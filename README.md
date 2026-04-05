@@ -6,8 +6,10 @@
 
 **[mcin.tel](https://mcin.tel)**
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)]()
-[![Minecraft](https://img.shields.io/badge/minecraft-java%20%26%20bedrock-green.svg)]()
+<p align="center">
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Minecraft-Java%20%26%20Bedrock-3C8527?style=for-the-badge&logo=minecraft&logoColor=white" />
+</p>
 
 *Gather, track, and analyze intelligence on Minecraft servers, players, and infrastructure.*
 
