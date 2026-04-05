@@ -434,9 +434,19 @@ class MojangClient:
         return result
 
     def _put_uuid_cached(self, username_lower: str, result: UuidLookupResult) -> None:
+        # Don't cache transient errors (timeouts, 5xx, network failures).
+        # Only cache confirmed hits and confirmed not-found responses so a
+        # temporary outage doesn't poison the cache for the full TTL.
+        if result.error is not None and not result.not_found:
+            return
         self._uuid_cache[username_lower] = (result, time.monotonic())
 
-    def _get_profile_cached(self, uuid_norm: str) -> MojangProfile | None:
+    def _get_profile_cached(
+        self,
+        uuid_norm: str,
+        *,
+        fetch_textures: bool = True,
+    ) -> MojangProfile | None:
         entry = self._profile_cache.get(uuid_norm)
         if entry is None:
             return None
@@ -444,9 +454,16 @@ class MojangClient:
         if time.monotonic() - stored_at > _PROFILE_CACHE_TTL:
             del self._profile_cache[uuid_norm]
             return None
+        # If the caller wants textures but the cached profile has none, treat
+        # it as a cache miss so textures are decoded and the entry refreshed.
+        if fetch_textures and profile.textures is None and profile.properties:
+            return None
         return profile
 
     def _put_profile_cached(self, uuid_norm: str, profile: MojangProfile) -> None:
+        # Don't cache transient errors — only successful fetches and not-found.
+        if profile.error is not None and profile.error != "Player not found":
+            return
         self._profile_cache[uuid_norm] = (profile, time.monotonic())
 
     # ── HTTP helper ───────────────────────────────────────────────────────────
@@ -740,7 +757,7 @@ class MojangClient:
             return MojangProfile(uuid=uuid, username="", error=f"Invalid UUID: {uuid!r}")
 
         # ── Cache check ────────────────────────────────────────────────────────
-        cached = self._get_profile_cached(uuid_norm)
+        cached = self._get_profile_cached(uuid_norm, fetch_textures=fetch_textures)
         if cached is not None:
             log.debug("Profile cache hit", uuid=uuid_norm)
             return cached

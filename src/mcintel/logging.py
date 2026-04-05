@@ -150,16 +150,20 @@ class _StructuredAdapter(logging.LoggerAdapter):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# Computed once at import time: the set of attribute names that belong to a
+# plain stdlib LogRecord.  Used by _extract_extras to filter out non-user fields
+# without allocating a fresh LogRecord on every log call.
+_STDLIB_LOG_ATTRS: frozenset[str] = frozenset(
+    logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
+) | {"message", "asctime", "taskName"}
+
 
 def _extract_extras(record: logging.LogRecord) -> dict[str, Any]:
     """Return fields that were injected via ``extra=`` and aren't stdlib attrs."""
-    stdlib_attrs = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()) | {
-        "message",
-        "asctime",
-        "taskName",
-    }
     return {
-        k: v for k, v in record.__dict__.items() if k not in stdlib_attrs and not k.startswith("_")
+        k: v
+        for k, v in record.__dict__.items()
+        if k not in _STDLIB_LOG_ATTRS and not k.startswith("_")
     }
 
 

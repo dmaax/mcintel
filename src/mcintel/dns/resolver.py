@@ -37,6 +37,7 @@ import dns.asyncresolver
 import dns.exception
 import dns.rdatatype
 import dns.resolver
+import dns.reversename
 import httpx
 
 from mcintel.config import settings
@@ -533,18 +534,21 @@ async def _resolve_bare_ip(
     port: int,
     chain: ResolutionChain,
     resolver: dns.asyncresolver.Resolver,
+    *,
+    lookup_ptr: bool = True,
 ) -> None:
     """
     Handle the case where *host* is already an IP address.
 
-    No SRV/A/CNAME lookups are needed, but we still do PTR.
+    No SRV/A/CNAME lookups are needed, but we still do PTR when *lookup_ptr*
+    is True.
     """
     chain.resolved_host = host
     chain.resolved_port = port
     chain.resolved_ips = [host]
 
-    # PTR lookup for reverse DNS
-    await _lookup_ptr(resolver, host, chain)
+    if lookup_ptr:
+        await _lookup_ptr(resolver, host, chain)
 
 
 # ---------------------------------------------------------------------------
@@ -606,12 +610,7 @@ async def resolve_server(
         # ── Bare IP — nothing to resolve ────────────────────────────────────
         if _is_ip_address(host):
             log.debug("Host is a bare IP, skipping DNS resolution", host=host)
-            await _resolve_bare_ip(host, port, chain, resolver)
-
-            if lookup_ns or lookup_txt:
-                # For bare IPs these make no sense at the IP level, skip them
-                pass
-
+            await _resolve_bare_ip(host, port, chain, resolver, lookup_ptr=lookup_ptr)
             return chain
 
         log.debug("Resolving DNS chain", host=host, port=port)

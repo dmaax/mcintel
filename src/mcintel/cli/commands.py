@@ -109,8 +109,18 @@ def _parse_address(address: str) -> tuple[str, int]:
     Parse a ``host`` or ``host:port`` string.
 
     Returns ``(host, port)`` — port defaults to 25565 if omitted.
+
+    Handles:
+      - Bare IPv4:          ``1.2.3.4``          → (1.2.3.4, 25565)
+      - IPv4 with port:     ``1.2.3.4:25566``    → (1.2.3.4, 25566)
+      - Bare IPv6:          ``::1``              → (::1, 25565)
+      - Bracketed IPv6:     ``[::1]:25565``      → (::1, 25565)
+      - Hostname:           ``play.example.com`` → (play.example.com, 25565)
+      - Hostname with port: ``play.example.com:25566``
     """
-    # Handle IPv6 addresses like [::1]:25565
+    import ipaddress
+
+    # Bracketed IPv6 like [::1] or [::1]:25565
     if address.startswith("["):
         close = address.find("]")
         if close != -1:
@@ -119,6 +129,15 @@ def _parse_address(address: str) -> tuple[str, int]:
             port = int(rest.lstrip(":")) if ":" in rest else 25565
             return host, port
 
+    # Bare IPv6 address (multiple colons, no brackets) — no port possible
+    try:
+        parsed = ipaddress.ip_address(address)
+        if parsed.version == 6:
+            return address, 25565
+    except ValueError:
+        pass
+
+    # IPv4 or hostname, optionally with :port suffix
     parts = address.rsplit(":", 1)
     if len(parts) == 2:
         try:
@@ -186,8 +205,11 @@ async def _lookup_async(
 
     result_data: dict = {}
 
+    # Status output goes to stderr when emitting JSON so stdout stays clean.
+    _status = err_console.status if as_json else console.status
+
     # ── Ping ─────────────────────────────────────────────────────────────────
-    with console.status(f"[cyan]Pinging [bold]{host}:{port}[/bold]…[/]"):
+    with _status(f"[cyan]Pinging [bold]{host}:{port}[/bold]…[/]"):
         if bedrock:
             from mcintel.scanner.bedrock import ping_bedrock
 
@@ -203,7 +225,7 @@ async def _lookup_async(
     chain = None
     geo_results = []
     if do_dns and not _is_bare_ip(host):
-        with console.status(f"[cyan]Resolving DNS for [bold]{host}[/bold]…[/]"):
+        with _status(f"[cyan]Resolving DNS for [bold]{host}[/bold]…[/]"):
             from mcintel.dns.resolver import lookup_ip_geo, resolve_server
 
             chain = await resolve_server(host, port, timeout=timeout)
@@ -213,7 +235,7 @@ async def _lookup_async(
                 geo_results = [await lookup_ip_geo(ip, timeout=8.0) for ip in chain.resolved_ips]
                 result_data["geo"] = [g.to_dict() for g in geo_results]
     elif do_geo and _is_bare_ip(host):
-        with console.status(f"[cyan]Geolocating [bold]{host}[/bold]…[/]"):
+        with _status(f"[cyan]Geolocating [bold]{host}[/bold]…[/]"):
             from mcintel.dns.resolver import lookup_ip_geo
 
             geo_info = await lookup_ip_geo(host, timeout=8.0)
@@ -417,7 +439,8 @@ async def _player_async(identifier: str, *, as_json: bool, timeout: float) -> No
         c in "0123456789abcdefABCDEF" for c in identifier.replace("-", "")
     )
 
-    with console.status(f"[cyan]Looking up player [bold]{identifier}[/bold]…[/]"):
+    _status = err_console.status if as_json else console.status
+    with _status(f"[cyan]Looking up player [bold]{identifier}[/bold]…[/]"):
         async with MojangClient(http_timeout=timeout) as client:
             if is_uuid:
                 profile = await client.get_profile(identifier)
@@ -531,7 +554,8 @@ async def _dns_async(
 ) -> None:
     from mcintel.dns.resolver import lookup_ip_geo, resolve_server
 
-    with console.status(f"[cyan]Resolving DNS for [bold]{domain}[/bold]…[/]"):
+    _status = err_console.status if as_json else console.status
+    with _status(f"[cyan]Resolving DNS for [bold]{domain}[/bold]…[/]"):
         chain = await resolve_server(domain, port, timeout=timeout)
         geo_results = []
         if do_geo and chain.resolved_ips:

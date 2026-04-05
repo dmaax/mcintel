@@ -8,7 +8,7 @@ API for full type-annotation support.
 
 Table overview
 --------------
-  servers            — tracked Minecraft servers (one row per unique ip:port)
+  servers            — tracked Minecraft servers (one row per unique host:port:edition)
   server_pings       — timestamped SLP / Bedrock responses for a server
   server_motd_history— deduplicated MOTD change log
   server_favicon_history — deduplicated favicon change log
@@ -27,7 +27,6 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -151,7 +150,7 @@ class Server(TimestampMixin, Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("host", "port", name="uq_server_host_port"),
+        UniqueConstraint("host", "port", "edition", name="uq_server_host_port_edition"),
         Index("ix_server_resolved_ip", "resolved_ip"),
         Index("ix_server_is_online", "is_online"),
         Index("ix_server_software", "software"),
@@ -191,7 +190,7 @@ class ServerPing(Base):
 
     __tablename__ = "server_pings"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -246,7 +245,7 @@ class ServerMotdHistory(Base):
 
     __tablename__ = "server_motd_history"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -278,7 +277,7 @@ class ServerFaviconHistory(Base):
 
     __tablename__ = "server_favicon_history"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -375,7 +374,7 @@ class PlayerUsernameHistory(Base):
 
     __tablename__ = "player_username_history"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -416,7 +415,7 @@ class PlayerSighting(Base):
 
     __tablename__ = "player_sightings"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -424,7 +423,7 @@ class PlayerSighting(Base):
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
     ping_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("server_pings.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("server_pings.id", ondelete="SET NULL"), nullable=True
     )
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -467,7 +466,7 @@ class DnsRecord(Base):
 
     __tablename__ = "dns_records"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -569,7 +568,7 @@ class PortScanResult(Base):
 
     __tablename__ = "port_scan_results"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     server_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True
     )

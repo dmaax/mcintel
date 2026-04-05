@@ -137,7 +137,7 @@ addopts = "-v --tb=short"
 # ─── Coverage ────────────────────────────────────────────────────────────────
 [tool.coverage.run]
 source = ["src/mcintel"]
-omit = ["tests/*", "src/mcintel/cli/*"]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true

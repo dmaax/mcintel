@@ -53,6 +53,10 @@ DEFAULT_PORT: int = 25565
 # Maximum JSON payload we are willing to read (4 MB)
 _MAX_PAYLOAD_BYTES: int = 4 * 1024 * 1024
 
+# Maximum character count accepted in a legacy kick packet response.
+# A realistic MOTD + metadata is well under 500 chars; 4096 is very generous.
+_MAX_LEGACY_CHAR_COUNT: int = 4096
+
 # Legacy / modern timeout defaults (seconds)
 _DEFAULT_TIMEOUT: float = 5.0
 
@@ -598,6 +602,9 @@ async def _ping_legacy(
             return result
 
         char_count = struct.unpack(">H", header[1:3])[0]
+        if char_count == 0 or char_count > _MAX_LEGACY_CHAR_COUNT:
+            result.error = f"Legacy response char_count out of range: {char_count}"
+            return result
         raw_bytes = await asyncio.wait_for(reader.readexactly(char_count * 2), timeout=timeout)
         raw_str = raw_bytes.decode("utf-16-be")
 
@@ -653,22 +660,27 @@ def _parse_legacy_response(raw: str, result: SlpResult) -> None:
             result.success = True
     else:
         # Old format: §<protocol>§<motd>§<online>§<max>
+        # The MOTD itself may contain § colour codes, so we cannot rely on a
+        # fixed index for the player counts.  Protocol is always parts[1];
+        # the last two fields are online and max; everything in between is MOTD.
         parts = raw.split("§")
-        # parts[0] = "", parts[1] = protocol, parts[2] = motd, parts[3] = online, parts[4] = max
+        # parts[0] = "" (before the leading §), parts[1] = protocol,
+        # parts[2:-2] = MOTD (may be multiple segments if MOTD has § codes),
+        # parts[-2] = online, parts[-1] = max
         if len(parts) >= 5:
             try:
                 result.version_protocol = int(parts[1])
             except (ValueError, IndexError):
                 pass
-            motd_raw = parts[2] if len(parts) > 2 else ""
+            motd_raw = "§".join(parts[2:-2])
             result.motd_raw = motd_raw
             result.motd_clean = _SECTION_SIGN_RE.sub("", motd_raw).strip()
             try:
-                result.players_online = int(parts[3])
+                result.players_online = int(parts[-2])
             except (ValueError, IndexError):
                 pass
             try:
-                result.players_max = int(parts[4])
+                result.players_max = int(parts[-1])
             except (ValueError, IndexError):
                 pass
             result.success = True

@@ -77,10 +77,10 @@ def _engine_kwargs() -> dict[str, Any]:
     return {
         # NullPool works well with async; avoids background threads.
         # For high-throughput production you may want AsyncAdaptedQueuePool.
+        # Note: pool_pre_ping is intentionally omitted — it has no effect with
+        # NullPool (which never reuses connections).
         "poolclass": NullPool,
         "echo": settings.app_debug,
-        # Connection pool health-check — reconnect on stale connections.
-        "pool_pre_ping": True,
     }
 
 
@@ -240,6 +240,10 @@ def _redact_url(url: str) -> str:
         if parsed.password:
             netloc = parsed.netloc.replace(parsed.password, "***")
             return urlunparse(parsed._replace(netloc=netloc))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        import sys
+
+        sys.stderr.write(
+            f"[mcintel] _redact_url: failed to redact URL ({exc!r}), returning as-is\n"
+        )
     return url

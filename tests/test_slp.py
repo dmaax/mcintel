@@ -488,11 +488,21 @@ class TestParseLegacyResponse:
         assert result.players_max == 200
 
     def test_old_format_colour_in_motd(self) -> None:
+        # MOTD contains § colour codes which should be stripped.
+        # Old format: §<protocol>§<motd>§<online>§<max>
+        # Here the MOTD is "§cRed §aGreen", so after splitting on § we get:
+        #   parts = ["", "47", "cRed ", "aGreen", "10", "50"]
+        # protocol=parts[1]="47", online=parts[-2]="10", max=parts[-1]="50"
+        # motd = "§".join(parts[2:-2]) = "cRed §aGreen" → clean = "Red Green"
         raw = "§47§§cRed §aGreen§10§50"
         result = self._make_result()
         _parse_legacy_response(raw, result)
         assert result.success
         assert "§" not in result.motd_clean
+        assert result.motd_clean == "Red Green"
+        assert result.version_protocol == 47
+        assert result.players_online == 10
+        assert result.players_max == 50
 
     def test_invalid_response(self) -> None:
         raw = "not a valid legacy response"

@@ -114,7 +114,6 @@ logs/
 node_modules/
 .next/
 .nuxt/
-dist/
 .output/
 
 # Docker
