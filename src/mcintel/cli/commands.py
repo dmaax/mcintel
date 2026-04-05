@@ -279,7 +279,7 @@ def _render_lookup(address, ping_result, chain, geo_results, *, bedrock: bool) -
             ping_table.add_row("Game mode", getattr(ping_result, "gamemode", None) or "n/a")
             ping_table.add_row("Edition", getattr(ping_result, "edition", "bedrock").title())
 
-        if ping_result.favicon_hash and not bedrock:
+        if getattr(ping_result, "favicon_hash", None) and not bedrock:
             ping_table.add_row("Favicon SHA-256", f"[dim]{ping_result.favicon_hash[:16]}…[/]")
 
     else:
