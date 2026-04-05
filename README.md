@@ -69,7 +69,7 @@ Whether you're a server administrator investigating copycat servers, a security 
 > **⚠️ Work in Progress** — mcintel is under active development. See [PLAN.md](PLAN.md) for the feature roadmap.
 
 ```
-git clone https://github.com/YOUR_USERNAME/mcintel.git
+git clone https://github.com/dmaax/mcintel.git
 cd mcintel
 ```
 
