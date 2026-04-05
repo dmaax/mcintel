@@ -24,17 +24,34 @@
 
 Foundation that everything else depends on.
 
-- [ ] Project scaffolding (monorepo layout, linting, CI)
-- [ ] Database schema design (PostgreSQL / SQLite for dev)
-  - Servers table (ip, port, first_seen, last_seen, etc.)
-  - Pings table (timestamped SLP responses)
-  - Players table (uuid, username, first_seen)
-  - DNS records table (historical A, SRV, CNAME entries)
-  - IP metadata table (geo, ASN, hosting provider)
-- [ ] Configuration system (YAML/TOML config, env vars, CLI flags)
-- [ ] Logging & structured output (JSON logs for pipeline use)
+- [x] Project scaffolding (monorepo layout, linting, CI)
+  - `pyproject.toml` with Hatch, Ruff, Mypy, pytest config
+  - `src/mcintel/` package layout
+  - `.gitignore`, `.env.example`
+- [x] Database schema design (PostgreSQL / SQLite for dev)
+  - `servers` table (host, port, edition, first_seen, last_seen, etc.)
+  - `server_pings` table (timestamped SLP / Bedrock responses)
+  - `server_motd_history` table (deduplicated MOTD change log)
+  - `server_favicon_history` table (deduplicated favicon change log)
+  - `players` table (uuid, username, skin, cape, first_seen)
+  - `player_username_history` table (observed username changes)
+  - `player_sightings` table ((server, player) observations from SLP samples)
+  - `dns_records` table (historical A, SRV, CNAME, PTR, NS, TXT entries)
+  - `ip_metadata` table (geo, ASN, hosting provider — cached per IP)
+  - `port_scan_results` table (open/closed port observations per host)
+- [x] Async SQLAlchemy session factory (SQLite dev / PostgreSQL prod)
+  - `db/session.py` — `init_db()`, `close_db()`, `get_session()`, FastAPI `db_session` dep
+  - Auto-create tables in dev/test; Alembic migrations for production
+- [x] Configuration system (env vars, `.env` file, pydantic-settings)
+  - `config.py` — typed `Settings` with all knobs documented in `.env.example`
+  - Convenience properties: `is_development`, `using_sqlite`, etc.
+- [x] Logging & structured output (text + JSON modes)
+  - `logging.py` — `get_logger(__name__)` adapter supporting keyword extras
+  - Two formatters: coloured human-readable (dev) and JSON-lines (production)
 - [ ] Job scheduler / task queue for recurring scans
 - [ ] Rate-limiting & politeness layer (respect targets, configurable delays)
+  - In-scanner semaphore (`ping_many`, `ping_bedrock_many`) ✓ (basic concurrency cap)
+  - Global target-level delay / opt-out list enforcement — pending
 
 ---
 
@@ -44,18 +61,27 @@ The bread and butter — query Minecraft servers and store everything.
 
 ### 2.1 Server List Ping (SLP)
 
-- [ ] Implement modern SLP protocol (1.7+)
+- [x] Implement modern SLP protocol (1.7+)
   - Handshake → Status Request → Status Response → Ping/Pong
-- [ ] Parse full JSON response and persist:
+  - VarInt encoding/decoding, packet framing, string encoding
+- [x] Parse full JSON response and persist:
   - `version.name` and `version.protocol`
   - `players.max`, `players.online`, `players.sample[]` (UUIDs + usernames)
   - `description` (MOTD — supports Chat component JSON and legacy `§` codes)
-  - `favicon` (base64 PNG)
-  - `modinfo` / `forgeData` (mod loader + mod list)
+  - `favicon` (base64 PNG) with SHA-256 hash
+  - `modinfo` / `forgeData` (Forge 1.7–1.12 and Forge 1.13+ / NeoForge formats)
   - `enforcesSecureChat`, `preventsChatReports` flags
-- [ ] Legacy SLP for servers < 1.7 (0xFE ping)
-- [ ] Bedrock Edition ping (RakNet unconnected ping)
+- [x] Legacy SLP for servers < 1.7 (0xFE ping)
+  - 1.6 extended payload (FE 01 FA MC|PingHost) with 1.3–1.5 fallback parsing
+  - Both old (`§proto§motd§online§max`) and new (`§1\0proto\0ver\0motd\0online\0max`) formats
+- [x] Bedrock Edition ping (RakNet Unconnected Ping/Pong)
+  - Full MCPE advertisement string parsing (all 12 fields)
+  - MCEE (Education Edition) detection
+  - Game mode mapping (string and numeric)
+- [x] Automatic modern → legacy fallback on failure
+- [x] Concurrent batch pinging with bounded semaphore (`ping_many`, `ping_bedrock_many`)
 - [ ] Scheduled pinging at configurable intervals (e.g., every 5 min, 15 min, 1 hr)
+  - Requires job scheduler (Phase 1 TODO)
 
 ### 2.2 Query Protocol (UDP 25565)
 
@@ -72,26 +98,33 @@ The bread and butter — query Minecraft servers and store everything.
 
 ### 2.4 Mod & Plugin Fingerprinting
 
-- [ ] Forge handshake to enumerate server-side mods and versions
-- [ ] Detect server software from `version.name` patterns:
-  - Vanilla, Spigot, Paper, Purpur, Folia, Fabric, Forge, NeoForge, Sponge, etc.
-- [ ] Detect proxy layers:
-  - BungeeCord, Waterfall, Velocity (via protocol behavior or error messages)
-  - GeyserMC (Bedrock-to-Java bridge detection)
+- [x] Parse Forge mod list from `modinfo.modList` (Forge 1.7–1.12 style)
+- [x] Parse NeoForge mod list from `forgeData.mods` (1.13+ style)
+- [x] Detect server software from `version.name` patterns:
+  - Vanilla, Spigot, Paper, Purpur, Pufferfish, Folia, Fabric, Quilt,
+    Forge, NeoForge, Sponge, Mohist, Arclight, CatServer
+- [x] Detect proxy layers from version name:
+  - BungeeCord, Waterfall, Travertine, Velocity
+  - GeyserMC (Bedrock-to-Java bridge)
+- [ ] Full Forge mod handshake (TCP-level, separate from SLP)
 - [ ] Known vulnerability flagging based on detected software + version
 
 ### 2.5 Favicon Tracking
 
-- [ ] Store favicon hashes (perceptual hash + SHA-256)
-- [ ] Track favicon changes over time
+- [x] Store favicon SHA-256 hash per ping
+- [x] `server_favicon_history` table for deduplicated change log
+- [ ] Perceptual hash (imagehash) for visual similarity clustering
+- [ ] Track favicon changes over time (diff logic / change detection job)
 - [ ] Cluster servers sharing identical or visually similar favicons
 - [ ] Reverse-search: "find all servers using this icon"
 
 ### 2.6 MOTD Analysis
 
-- [ ] Strip formatting codes, store both raw and plaintext
+- [x] Strip formatting codes (`§` colour codes), store both raw and plaintext
+- [x] Recursive Chat component JSON parsing (nested `extra`, `translate`)
+- [x] `server_motd_history` table for deduplicated change log
 - [ ] Extract potential contact information (Discord invite links, URLs, emails)
-- [ ] Track MOTD changes over time (diff history)
+- [ ] Track MOTD changes over time (change detection job)
 - [ ] Cluster servers by similar MOTD text (fuzzy matching)
 
 ---
@@ -102,35 +135,46 @@ Map the network footprint of a Minecraft server.
 
 ### 3.1 DNS Resolution Chain
 
-- [ ] **SRV record lookup**: `_minecraft._tcp.<domain>` → target host + port
-- [ ] **A / AAAA record fallback** when no SRV exists
-- [ ] **CNAME chain following** — record the full chain
-- [ ] Store historical DNS records with timestamps (DNS history)
-- [ ] Detect DNS changes / migrations over time
-- [ ] Reverse DNS (PTR) lookups on server IPs
-- [ ] TXT record inspection (SPF, verification tokens — can reveal hosting info)
-- [ ] NS record tracking (identify DNS provider: Cloudflare, etc.)
+- [x] **SRV record lookup**: `_minecraft._tcp.<domain>` → target host + port
+  - Priority/weight-aware (picks best record)
+- [x] **A / AAAA record fallback** when no SRV exists
+- [x] **CNAME chain following** — records every hop in the chain (loop-safe, max depth 10)
+- [x] Reverse DNS (PTR) lookups on server IPs
+- [x] TXT record inspection (SPF, verification tokens)
+- [x] NS record tracking (identify DNS provider)
+- [x] `dns_records` table for historical storage
+- [x] Bare-IP detection (skips DNS, goes straight to PTR)
+- [ ] Store historical DNS records with timestamps + change detection
+- [ ] Detect DNS changes / migrations over time (scheduler job)
+- [ ] DNS history diff reporting
 
 ### 3.2 IP Intelligence
 
-- [ ] **ipinfo.io integration** — `https://ipinfo.io/{ip}/json`
+- [x] **ipinfo.io integration** — `https://ipinfo.io/{ip}/json`
   - Geolocation (city, region, country, coordinates)
-  - ASN & organization name
-  - Hosting provider detection (is this a datacenter or residential?)
+  - ASN & organisation name parsing (`"AS16276 OVH SAS"` → `asn`, `org`)
+  - Timezone, postal code, reverse-DNS hostname
+  - Privacy block parsing (VPN, proxy, Tor, hosting flags)
+- [x] Heuristic datacenter detection from org name (free-tier fallback)
+- [x] In-memory geo cache (1-hour TTL) to avoid redundant API calls
+- [x] `ip_metadata` table for persistent caching
 - [ ] Support for alternative providers (MaxMind GeoLite2, ip-api.com) as fallback
 - [ ] Historical IP tracking — when did the server change IPs?
 - [ ] Map visualization of server locations (GeoJSON export)
 
 ### 3.3 DDoS Protection & Proxy Detection
 
-- [ ] Detect common Minecraft DDoS protection services:
-  - TCPShield, Cosmic Guard, NeoProtect, OVH Game DDoS Protection
-- [ ] Identify if IP belongs to a known proxy/protection network
-- [ ] Attempt to discover origin IP behind protection layers (via DNS history, certificate transparency, etc.)
+- [x] Detect common Minecraft DDoS protection services by ASN/org name:
+  - TCPShield, Cosmic Guard, NeoProtect, OVH, Path.net, Cloudflare, Akamai
+- [x] `protection_provider` field on `IpGeoInfo` / `ip_metadata`
+- [ ] Identify if IP belongs to a known proxy/protection network (ASN list)
+- [ ] Attempt to discover origin IP behind protection layers
+  (via DNS history, certificate transparency, etc.)
 
 ### 3.4 Port Fingerprinting
 
-- [ ] Scan for common Minecraft-adjacent ports on the same host:
+- [x] `port_scan_results` table schema (port, protocol, is_open, service_name, banner)
+- [ ] Active scanning for common Minecraft-adjacent ports:
   | Port  | Service                    |
   |-------|----------------------------|
   | 25565 | Minecraft Java (default)   |
@@ -152,27 +196,46 @@ Track and correlate player identities across the Minecraft ecosystem.
 
 ### 4.1 UUID & Username Resolution
 
-- [ ] Mojang API integration:
-  - Username → UUID: `https://api.mojang.com/users/profiles/minecraft/<username>`
-  - UUID → Profile: `https://sessionserver.mojang.com/session/minecraft/profile/<uuid>`
-- [ ] Cache results locally to avoid rate limits
-- [ ] Detect "cracked" (offline-mode) servers by checking UUID format (v3 vs v4)
+- [x] Mojang API integration:
+  - Username → UUID: `GET /users/profiles/minecraft/<username>`
+  - UUID → Profile: `GET /session/minecraft/profile/<uuid>?unsigned=false`
+  - Bulk username → UUID: `POST /profiles/minecraft` (up to 10 per call)
+- [x] In-memory cache (1-hour TTL for found players, 5-min TTL for not-found)
+- [x] `MojangClient` async context manager with connection reuse
+- [x] Rate-limiting per endpoint key (minimum inter-request interval)
+- [x] Detect "cracked" (offline-mode) servers by UUID format:
+  - Version 4 (random) → premium/online-mode account
+  - Version 3 (name-based MD5) → offline/cracked UUID
+- [x] `offline_uuid(username)` — compute offline-mode UUID matching Minecraft's algorithm
+- [x] Module-level convenience functions: `lookup_uuid`, `lookup_profile`, `lookup_profile_by_username`
 
 ### 4.2 Username History
 
-- [ ] Track usernames observed in SLP `players.sample[]` over time
+- [x] `player_username_history` table schema (per-player, deduped by username)
+- [x] `player_sightings` table schema (server × player × ping observations)
+- [ ] Populate history from SLP `players.sample[]` during pings (scheduler job)
 - [ ] Correlate UUID sightings across multiple servers
 - [ ] Build a timeline: "Player X was seen on Server A on date Y"
 
 ### 4.3 Skin & Cape Analysis
 
-- [ ] Download and store player skin textures from session server
-- [ ] Detect cape types (Mojang, OptiFine, MinecraftCapes, LabyMod)
-- [ ] Skin change history tracking
-- [ ] Perceptual hashing for finding similar/identical skins
+- [x] Download and decode skin/cape texture URLs from `textures` property
+  - Base64 → JSON → SKIN/CAPE URL extraction
+  - Skin model variant detection (`"classic"` / `"slim"`)
+- [x] Cape type classification by URL pattern:
+  - `textures.minecraft.net` → Mojang
+  - `optifine.net` → OptiFine
+  - `labymod.net` → LabyMod
+  - `minecraftcapes.co.uk` / `minecraftcapes.net` → MinecraftCapes
+  - Unknown domain → `"unknown"`
+- [x] `skin_url`, `cape_url`, `skin_variant` fields on `Player` model
+- [ ] Download and persist raw skin PNG bytes
+- [ ] SHA-256 + perceptual hash of skin texture
+- [ ] Skin change history tracking (detect skin swaps over time)
 
 ### 4.4 Player-Server Association Graph
 
+- [x] `player_sightings` table schema
 - [ ] Build a graph of which players frequent which servers
 - [ ] Identify "bridge" players that connect otherwise unrelated servers
 - [ ] Detect alt accounts by analyzing co-occurrence patterns
@@ -378,11 +441,17 @@ Make it accessible.
 
 ### 10.3 CLI Tool
 
-- [ ] `mcintel lookup <address>` — quick single-server lookup
-- [ ] `mcintel scan <cidr>` — scan an IP range
+- [x] `mcintel lookup <address>` — full server intelligence report (ping + DNS + geo)
+  - `--bedrock` flag for Bedrock servers
+  - `--json` flag for machine-readable output
+  - `--no-dns` / `--no-geo` flags to skip subsystems
+- [x] `mcintel scan <host> [--port] [--bedrock]` — scan a single server
+- [x] `mcintel player <username|uuid>` — player lookup (UUID, skin, cape, premium/offline)
+  - `--json` flag for machine-readable output
+- [x] `mcintel dns <domain>` — full DNS chain analysis with optional geo
+  - `--port`, `--no-geo`, `--json` flags
+- [x] `mcintel version` — print version and exit
 - [ ] `mcintel watch <address>` — continuous monitoring with live output
-- [ ] `mcintel player <username|uuid>` — player lookup
-- [ ] `mcintel dns <domain>` — full DNS chain analysis
 - [ ] `mcintel export <address> --format json|csv|pdf` — export reports
 - [ ] `mcintel daemon` — run the scheduler/collector in the background
 
@@ -395,14 +464,14 @@ Unscoped ideas that don't fit neatly into a phase yet.
 - **Minecraft protocol version history database** — map protocol numbers to release names
 - **Server JAR fingerprinting** — identify exact server software from protocol quirks
 - **Honeypot detection** — identify servers that are likely honeypots (unusual behavior)
-- **Cracked server enumeration** — detect offline-mode servers (UUID format analysis)
+- **Cracked server enumeration** — detect offline-mode servers (UUID format analysis) ✓ (UUID v3 detection implemented)
 - **Resource pack URL extraction** — servers can push resource packs; URL may leak info
 - **Chat protocol analysis** — join servers to passively observe chat (ethical/legal considerations)
 - **Velocity modern forwarding detection** — distinguish proxy types by handshake behavior
 - **Plugin message channel enumeration** — detect registered plugin channels (reveals plugins)
 - **SRV record hijack monitoring** — alert if a tracked domain's SRV record changes unexpectedly
 - **Minecraft Realms lookup** — discover and track Realms servers via the Realms API
-- **Bedrock server intelligence** — full parity with Java edition features
+- **Bedrock server intelligence** — full parity with Java edition features ✓ (ping implemented)
 - **WHOIS integration** — domain ownership data for servers using custom domains
 - **Email/OSINT pivoting** — from a server domain, find registrant info → other domains
 - **Screenshot service** — join a server briefly, capture spawn screenshot, archive it
@@ -410,6 +479,7 @@ Unscoped ideas that don't fit neatly into a phase yet.
 - **Discord bot** — `/mcintel lookup play.example.com` for quick lookups in Discord
 - **Telegram bot** — same as above for Telegram users
 - **Public dataset exports** — periodic anonymized data dumps for researchers
+- **Alembic migrations** — set up production-grade schema migrations
 
 ---
 
@@ -417,16 +487,21 @@ Unscoped ideas that don't fit neatly into a phase yet.
 
 ### Language & Stack
 
-| Component    | Candidates                                      |
-|-------------|------------------------------------------------|
-| Core engine  | Rust or Go (performance for mass scanning)      |
-| API server   | Rust (Axum), Go (Gin/Echo), or Python (FastAPI) |
-| Frontend     | Next.js / SvelteKit / Astro                     |
-| Database     | PostgreSQL (primary), Redis (caching/queues)    |
-| Task queue   | Redis-backed (Celery, Bull, or custom)          |
-| Time-series  | TimescaleDB extension or ClickHouse             |
-| Search       | Meilisearch or Elasticsearch                    |
-| Graphs       | Chart.js, D3.js, or Grafana embeds              |
+| Component    | Status / Choice                                         |
+|-------------|--------------------------------------------------------|
+| Core engine  | Python 3.12 + asyncio (prototype); Rust/Go for scale   |
+| API server   | FastAPI (planned, foundation in place)                  |
+| Frontend     | Next.js / SvelteKit / Astro (TBD)                      |
+| Database     | PostgreSQL (prod), SQLite+aiosqlite (dev/test)         |
+| ORM          | SQLAlchemy 2.0 async                                   |
+| Migrations   | Alembic (schema ready; migration scripts pending)      |
+| Task queue   | Redis-backed (Celery, Bull, or custom) — pending       |
+| Time-series  | TimescaleDB extension or ClickHouse — pending          |
+| Search       | Meilisearch or Elasticsearch — pending                 |
+| Graphs       | Chart.js, D3.js, or Grafana embeds — pending           |
+| DNS          | dnspython (async)                                      |
+| HTTP         | httpx (async)                                          |
+| CLI          | Typer + Rich                                           |
 
 ### Ethical Guidelines
 
@@ -441,4 +516,24 @@ Unscoped ideas that don't fit neatly into a phase yet.
 
 ---
 
-*Last updated: 2026*
+## Progress Log
+
+### Branch: `feature/phase-1-2-core-infrastructure`
+
+**Completed (2025):**
+
+| Area | What was built |
+|---|---|
+| Project scaffold | `pyproject.toml`, `.gitignore`, `.env.example`, `src/` layout, `data/.gitkeep` |
+| Config | `mcintel/config.py` — typed pydantic-settings `Settings` singleton |
+| Logging | `mcintel/logging.py` — structured text/JSON logging with keyword extras |
+| DB session | `mcintel/db/session.py` — async SQLAlchemy, auto-create for dev, FastAPI dep |
+| DB models | `mcintel/db/models.py` — 9 tables: `Server`, `ServerPing`, `ServerMotdHistory`, `ServerFaviconHistory`, `Player`, `PlayerUsernameHistory`, `PlayerSighting`, `DnsRecord`, `IpMetadata`, `PortScanResult` |
+| Java SLP | `mcintel/scanner/slp.py` — modern (1.7+) + legacy (1.4–1.6) protocols, full JSON parsing, Chat component parsing, mod detection, software fingerprinting, `ping_many` |
+| Bedrock ping | `mcintel/scanner/bedrock.py` — RakNet Unconnected Ping/Pong, full MCPE advertisement parsing, `ping_bedrock_many` |
+| DNS resolver | `mcintel/dns/resolver.py` — SRV, A/AAAA, CNAME chain, PTR, NS, TXT; ipinfo.io geo integration; in-memory cache |
+| Player intel | `mcintel/players/mojang.py` — UUID lookup, bulk lookup, full profile+textures, offline UUID, cape classification, `MojangClient` |
+| CLI | `mcintel/cli/commands.py` — `lookup`, `scan`, `player`, `dns`, `version` commands with Rich output and `--json` flag |
+| Tests | `tests/test_slp.py` (130+ tests), `tests/test_dns.py` (100+ tests), `tests/test_players.py` (65+ tests) — **295 tests, 0 failures** |
+
+*Last updated: 2025*
